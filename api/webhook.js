@@ -70,10 +70,7 @@ export default async function handler(req, res) {
               "Error saving user:",
               err.response?.data || err.message
             );
-            await sendMessage(
-              chatId,
-              "⚠️ Something went wrong. Please try again later."
-            );
+            await sendMessage(chatId, `⚠️ ${err.response?.data?.message}`);
           }
         }
       }
