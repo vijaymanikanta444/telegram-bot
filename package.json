@@ -1,12 +1,9 @@
 {
   "name": "telegram-bot",
   "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
+  "main": "api/webhook.js",
+  "type": "module",
   "dependencies": {
-    "axios": "^1.6.0",
-    "telegraf": "^4.12.0"
+    "axios": "^1.6.7"
   }
 }
