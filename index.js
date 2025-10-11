@@ -42,7 +42,7 @@ module.exports = async (req, res) => {
 
         try {
           await axios.post(
-            `${process.env.BACKEND_URL}/setUserDetails`,
+            `${process.env.BACKEND_URL}/createUser`,
             session.data
           );
           await bot.telegram.sendMessage(
