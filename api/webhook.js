@@ -28,7 +28,7 @@ export default async function handler(req, res) {
 
   const chatId = body.message?.chat?.id || body.callback_query?.from?.id;
 
-  console.log({ body });
+  console.log({ body, message: body.message, chat: body.message.chat });
 
   // --- Handle callback query (inline buttons) ---
   if (body.callback_query) {
