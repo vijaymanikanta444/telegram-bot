@@ -49,7 +49,10 @@ export default async function handler(req, res) {
     // Handle update field selection
     if (data?.startsWith("update_")) {
       if (!userState) {
-        await sendMessage(chatId, "⚠️ Something went wrong. Try /start again.");
+        await sendMessage(
+          chatId,
+          "⚠️ Something went wrong. Try /register again."
+        );
       } else {
         const field = data.replace("update_", "");
         userState.step = `update_${field}`;
@@ -97,7 +100,7 @@ export default async function handler(req, res) {
     console.log("Existing user:", chatId, existingUser);
 
     // New user
-    if (!existingUser && text === "/start") {
+    if (!existingUser && text === "/register") {
       userStates.set(chatId, { step: "askName" });
       await sendMessage(chatId, "👋 Welcome! What's your *name*?");
       res.statusCode = 200;
