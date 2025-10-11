@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   if (typeof body === "string") {
     try {
       body = JSON.parse(body);
-    } catch {
+    } catch (err) {
       res.statusCode = 400;
       res.end("Invalid JSON");
       return;
@@ -22,128 +22,238 @@ export default async function handler(req, res) {
 
   if (!body) {
     res.statusCode = 200;
-    res.end("No body");
+    res.end("No body received");
     return;
   }
 
-  // Handle callback_query (inline buttons)
+  const chatId = body.message?.chat?.id || body.callback_query?.from?.id;
+
+  // --- Handle callback query (inline buttons) ---
   if (body.callback_query) {
-    await handleCallback(body.callback_query);
-    res.statusCode = 200;
-    res.end("OK");
-    return;
-  }
+    const callbackQuery = body.callback_query;
+    const data = callbackQuery.data;
 
-  // Handle normal messages
-  if (req.method === "POST" && body.message) {
-    await handleMessage(body.message);
-    res.statusCode = 200;
-    res.end("OK");
-  } else {
-    res.statusCode = 200;
-    res.end("Telegram bot webhook running 🚀");
-  }
-}
-
-// ---------------- Handlers ----------------
-
-async function handleCallback(callback) {
-  const chatId = callback.from.id;
-  const data = callback.data;
-
-  if (data === "no_email") {
     const userState = userStates.get(chatId);
-    if (userState) {
-      userState.email = null;
-      userState.step = "askPhone";
-      await sendMessage(
-        chatId,
-        "📱 Please enter your phone number (digits only):"
-      );
+
+    if (data === "no_email") {
+      if (userState) {
+        userState.email = null;
+        userState.step = "askPhone";
+        await sendMessage(
+          chatId,
+          "📱 Please enter your *phone number* (digits only, e.g., 9876543210):"
+        );
+      }
     }
 
-    // Answer callback to remove Telegram loading spinner
+    // Handle update field selection
+    if (data?.startsWith("update_")) {
+      if (!userState) {
+        await sendMessage(chatId, "⚠️ Something went wrong. Try /start again.");
+      } else {
+        const field = data.replace("update_", "");
+        userState.step = `update_${field}`;
+        const current = userState.user[field] ?? "Not set";
+        await sendMessage(
+          chatId,
+          `📝 Current ${field}: ${current}\nEnter new value:`
+        );
+      }
+    }
+
+    // Answer callback to remove loading spinner
     await axios.post(
       `https://api.telegram.org/bot${process.env.BOT_TOKEN}/answerCallbackQuery`,
-      { callback_query_id: callback.id }
+      { callback_query_id: callbackQuery.id }
     );
-  }
-}
 
-async function handleMessage(message) {
-  const chatId = message.chat.id;
-  const text = message.text?.trim();
-  let userState = userStates.get(chatId);
-
-  if (text === "/start") {
-    userStates.set(chatId, { step: "askName" });
-    await sendMessage(chatId, "👋 Welcome! What's your *name*?");
+    res.statusCode = 200;
+    res.end("OK");
     return;
   }
 
-  if (!userState) return; // No active flow
+  // --- Handle normal messages ---
+  if (req.method === "POST" && body.message) {
+    const message = body.message;
+    const text = message.text?.trim();
 
-  // ---------------- Flow Steps ----------------
-  switch (userState.step) {
-    case "askName":
+    // Fetch user from backend by chatId
+    let existingUser = null;
+    try {
+      const resp = await axios.get(
+        `${process.env.BACKEND_URL}/getUser/${chatId}`
+      );
+      if (resp.data.success) existingUser = resp.data.user;
+    } catch (err) {
+      if (err.response?.status !== 404) {
+        console.error("Error fetching user:", err.message);
+        await sendMessage(chatId, "⚠️ Could not check user. Try again later.");
+        res.statusCode = 200;
+        res.end("OK");
+        return;
+      }
+    }
+
+    // New user
+    if (!existingUser && text === "/start") {
+      userStates.set(chatId, { step: "askName" });
+      await sendMessage(chatId, "👋 Welcome! What's your *name*?");
+      res.statusCode = 200;
+      res.end("OK");
+      return;
+    }
+
+    // Existing user: offer update menu
+    if (existingUser && !userStates.get(chatId)) {
+      userStates.set(chatId, { step: "update_menu", user: existingUser });
+      const buttons = [
+        { text: "Name", callback_data: "update_name" },
+        { text: "Email", callback_data: "update_email" },
+        { text: "Phone", callback_data: "update_phone" },
+        { text: "Birthday", callback_data: "update_birthday" },
+      ];
+      await sendMessageWithButton(
+        chatId,
+        "📝 You are already registered. What would you like to update?",
+        buttons
+      );
+      res.statusCode = 200;
+      res.end("OK");
+      return;
+    }
+
+    const userState = userStates.get(chatId);
+    if (!userState) {
+      res.statusCode = 200;
+      res.end("OK");
+      return;
+    }
+
+    // --- Handle update steps ---
+    if (userState.step?.startsWith("update_")) {
+      const field = userState.step.replace("update_", "");
+
+      // Validate field
+      if (field === "email" && text !== "No email" && !isValidEmail(text)) {
+        await sendMessageWithButton(
+          chatId,
+          "❌ Invalid email. Enter valid or 'No email'",
+          [{ text: "No email", callback_data: "no_email" }]
+        );
+        res.statusCode = 200;
+        res.end("OK");
+        return;
+      }
+      if (field === "phone" && !isValidPhone(text)) {
+        await sendMessage(
+          chatId,
+          "❌ Invalid phone number. Enter digits only (7-15 digits)."
+        );
+        res.statusCode = 200;
+        res.end("OK");
+        return;
+      }
+      if (field === "birthday") {
+        const [day, month] = text.split("-").map(Number);
+        if (!isValidBirthday(day, month)) {
+          await sendMessage(
+            chatId,
+            "❌ Invalid birthday. Enter in DD-MM format (e.g., 25-12)."
+          );
+          res.statusCode = 200;
+          res.end("OK");
+          return;
+        }
+        userState.user.birthdayDay = day;
+        userState.user.birthdayMonth = month;
+      } else {
+        userState.user[field] = text === "No email" ? null : text;
+      }
+
+      // Save updated field to backend
+      try {
+        await axios.patch(
+          `${process.env.BACKEND_URL}/updateUser/${chatId}`,
+          userState.user
+        );
+        await sendMessage(chatId, `✅ Updated ${field} successfully.`);
+        userStates.delete(chatId);
+      } catch (err) {
+        console.error("Error updating user:", err.message);
+        await sendMessage(chatId, "⚠️ Could not update. Try again later.");
+      }
+
+      res.statusCode = 200;
+      res.end("OK");
+      return;
+    }
+
+    // --- Normal new user flow continues ---
+    if (userState.step === "askName") {
       userState.name = text;
       userState.step = "askEmail";
-      await sendMessageWithButton(chatId, "📧 Please enter your email:", [
-        { text: "No email", callback_data: "no_email" },
-      ]);
-      break;
-
-    case "askEmail":
+      await sendMessageWithButton(
+        chatId,
+        "📧 Please enter your *email* (e.g., name@example.com):",
+        [{ text: "No email", callback_data: "no_email" }]
+      );
+    } else if (userState.step === "askEmail") {
       if (text !== "No email" && !isValidEmail(text)) {
         await sendMessageWithButton(
           chatId,
           "❌ Invalid email. Enter valid or 'No email':",
           [{ text: "No email", callback_data: "no_email" }]
         );
+        res.statusCode = 200;
+        res.end("OK");
         return;
       }
       userState.email = text === "No email" ? null : text;
       userState.step = "askPhone";
       await sendMessage(
         chatId,
-        "📱 Please enter your phone number (digits only):"
+        "📱 Please enter your *phone number* (digits only, e.g., 9876543210):"
       );
-      break;
-
-    case "askPhone":
+    } else if (userState.step === "askPhone") {
       if (!isValidPhone(text)) {
         await sendMessage(
           chatId,
-          "❌ Invalid phone number. Enter 7-15 digits."
+          "❌ Invalid phone number. Enter digits only (7-15 digits)."
         );
+        res.statusCode = 200;
+        res.end("OK");
         return;
       }
       userState.phone = text;
       userState.step = "askBirthday";
       await sendMessage(
         chatId,
-        "🎂 Enter your birthday in `DD-MM` format (e.g., 25-12):"
+        "🎂 Enter your *birthday* in `DD-MM` format (e.g., 25-12):"
       );
-      break;
-
-    case "askBirthday":
+    } else if (userState.step === "askBirthday") {
       const [day, month] = text.split("-").map(Number);
-      if (!day || !month || !isValidBirthday(day, month)) {
-        await sendMessage(chatId, "❌ Invalid birthday format. Use `DD-MM`.");
+      if (!isValidBirthday(day, month)) {
+        await sendMessage(
+          chatId,
+          "❌ Invalid birthday. Enter in DD-MM format (e.g., 25-12):"
+        );
+        res.statusCode = 200;
+        res.end("OK");
         return;
       }
+
       userState.birthdayDay = day;
       userState.birthdayMonth = month;
 
-      // Save to backend
+      // Save new user
       try {
         await axios.post(`${process.env.BACKEND_URL}/createUser`, {
           chatId,
           name: userState.name,
           email: userState.email,
           phone: userState.phone,
-          birthdayDay: userState.birthdayDay,
-          birthdayMonth: userState.birthdayMonth,
+          birthdayDay: day,
+          birthdayMonth: month,
         });
         await sendMessage(
           chatId,
@@ -151,9 +261,15 @@ async function handleMessage(message) {
         );
         userStates.delete(chatId);
       } catch (err) {
-        console.error("Error saving user:", err.response?.data || err.message);
-        await sendMessage(chatId, "⚠️ Something went wrong. Try again later.");
+        console.error("Error saving user:", err.message);
+        await sendMessage(chatId, "⚠️ Could not save. Try again later.");
       }
-      break;
+    }
+
+    res.statusCode = 200;
+    res.end("OK");
+  } else {
+    res.statusCode = 200;
+    res.end("Telegram bot webhook running 🚀");
   }
 }
