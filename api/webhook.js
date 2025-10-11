@@ -83,8 +83,7 @@ export default async function handler(req, res) {
       const resp = await axios.get(
         `${process.env.BACKEND_URL}/getUser/${chatId}`
       );
-      console.log({ resp });
-      if (resp.data.success) existingUser = resp.data.user;
+      if (resp.status === 200) existingUser = resp.data;
     } catch (err) {
       if (err.response?.status !== 404) {
         console.error("Error fetching user:", err.message);
