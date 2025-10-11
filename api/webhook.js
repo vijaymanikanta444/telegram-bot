@@ -94,6 +94,8 @@ export default async function handler(req, res) {
       }
     }
 
+    console.log("Existing user:", chatId, existingUser);
+
     // New user
     if (!existingUser && text === "/start") {
       userStates.set(chatId, { step: "askName" });
