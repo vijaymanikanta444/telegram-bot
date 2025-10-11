@@ -1,3 +1,4 @@
+// api/webhook.js
 import { userStates } from "../states/userStates.js";
 import { sendMessage, sendMessageWithButton } from "../utils/telegram.js";
 import {
@@ -8,9 +9,28 @@ import {
 import axios from "axios";
 
 export default async function handler(req, res) {
-  // Handle Telegram callback query (inline button clicks)
-  if (req.body.callback_query) {
-    const callbackQuery = req.body.callback_query;
+  // Parse body safely
+  let body = req.body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch (err) {
+      console.error("Failed to parse body:", err);
+      res.statusCode = 400;
+      res.end("Invalid JSON");
+      return;
+    }
+  }
+
+  if (!body) {
+    res.statusCode = 200;
+    res.end("No body received");
+    return;
+  }
+
+  // --- Handle Telegram callback_query (inline buttons) ---
+  if (body.callback_query) {
+    const callbackQuery = body.callback_query;
     const chatId = callbackQuery.from.id;
     const data = callbackQuery.data;
 
@@ -25,7 +45,6 @@ export default async function handler(req, res) {
         );
       }
 
-      // Answer callback to remove loading spinner
       await axios.post(
         `https://api.telegram.org/bot${process.env.BOT_TOKEN}/answerCallbackQuery`,
         { callback_query_id: callbackQuery.id }
@@ -37,17 +56,9 @@ export default async function handler(req, res) {
     }
   }
 
-  // Handle normal messages
-  if (req.method === "POST") {
-    const { message } = req.body;
-    console.log({ message });
-
-    if (!message) {
-      res.statusCode = 200;
-      res.end("OK");
-      return;
-    }
-
+  // --- Handle normal messages ---
+  if (req.method === "POST" && body.message) {
+    const message = body.message;
     const chatId = message.chat.id;
     const text = message.text?.trim();
 
