@@ -1,10 +1,10 @@
-import { userStates } from "../states/userStates";
-import { sendMessage, sendMessageWithButton } from "../utils/telegram";
+import { userStates } from "../states/userStates.js";
+import { sendMessage, sendMessageWithButton } from "../utils/telegram.js";
 import {
   isValidEmail,
   isValidPhone,
   isValidBirthday,
-} from "../utils/validators";
+} from "../utils/validators.js";
 import axios from "axios";
 
 export default async function handler(req, res) {
