@@ -41,7 +41,9 @@ export default async function handler(req, res) {
               chatId,
               "❌ Invalid format. Please enter in `DD-MM` format:"
             );
-            return res.sendStatus(200);
+            res.statusCode = 200;
+            res.end("OK");
+            return;
           }
 
           userState.birthdayDay = day;
@@ -64,7 +66,10 @@ export default async function handler(req, res) {
             );
             userStates.delete(chatId);
           } catch (err) {
-            console.error(err);
+            console.error(
+              "Error saving user:",
+              err.response?.data || err.message
+            );
             await sendMessage(
               chatId,
               "⚠️ Something went wrong. Please try again later."
@@ -74,19 +79,26 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.sendStatus(200);
+    // Always respond to Telegram to prevent retries
+    res.statusCode = 200;
+    res.end("OK");
   } else {
-    res.status(200).send("Telegram bot webhook running 🚀");
+    res.statusCode = 200;
+    res.end("Telegram bot webhook running 🚀");
   }
 }
 
 async function sendMessage(chatId, text) {
-  return axios.post(
-    `https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`,
-    {
-      chat_id: chatId,
-      text,
-      parse_mode: "Markdown",
-    }
-  );
+  try {
+    await axios.post(
+      `https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`,
+      {
+        chat_id: chatId,
+        text,
+        parse_mode: "Markdown",
+      }
+    );
+  } catch (err) {
+    console.error("Error sending message:", err.response?.data || err.message);
+  }
 }
